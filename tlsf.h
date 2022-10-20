@@ -25,6 +25,9 @@ tlsf_t tlsf_create_with_pool(void* mem, size_t bytes);
 void tlsf_destroy(tlsf_t tlsf);
 pool_t tlsf_get_pool(tlsf_t tlsf);
 
+size_t tlsf_free_size();
+size_t tlsf_min_free_size();
+
 /* Add/remove memory pools. */
 pool_t tlsf_add_pool(tlsf_t tlsf, void* mem, size_t bytes);
 void tlsf_remove_pool(tlsf_t tlsf, pool_t pool);
@@ -56,10 +59,10 @@ int tlsf_check_pool(pool_t pool);
 
 /*!
  * @brief Weak function filling the given memory with a given fill pattern.
- * 
+ *
  * @param start: pointer to the start of the memory region to fill
  * @param size: size of the memory region to fill
- * @param is_free: Indicate if the pattern to use the fill the region should be 
+ * @param is_free: Indicate if the pattern to use the fill the region should be
  * an after free or after allocation pattern.
  */
 __attribute__((weak)) void block_absorb_post_hook(void *start, size_t size, bool is_free);
@@ -67,7 +70,7 @@ __attribute__((weak)) void block_absorb_post_hook(void *start, size_t size, bool
 /**
  * @brief Weak function called on every free block of memory allowing the user to implement
  * application specific checks on the memory.
- * 
+ *
  * @param start The start pointer to the memory of a block
  * @param size The size of the memory in the block
  * @param is_free Set to true when the memory belongs to a free block.

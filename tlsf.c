@@ -253,7 +253,7 @@ static inline __attribute__((always_inline)) size_t adjust_request_size(size_t s
 		const size_t aligned = align_up(size, align);
 
 		/* aligned sized must not exceed block_size_max or we'll go out of bounds on sl_bitmap */
-		if (aligned < block_size_max) 
+		if (aligned < block_size_max)
 		{
 			adjust = tlsf_max(aligned, block_size_min);
 		}
@@ -554,9 +554,9 @@ static inline __attribute__((always_inline)) block_header_t* block_locate_free(c
 	if (size)
 	{
 		mapping_search(size, &fl, &sl);
-		
+
 		/*
-		** mapping_search can futz with the size, so for excessively large sizes it can sometimes wind up 
+		** mapping_search can futz with the size, so for excessively large sizes it can sometimes wind up
 		** with indices that are off the end of the block array.
 		** So, we protect against that here, since this is the only callsite of mapping_search.
 		** Note that we don't need to check sl, since it comes from a modulo operation that guarantees it's always in range.
@@ -692,7 +692,7 @@ int tlsf_check(tlsf_t tlsf)
 					 * as this field is in fact part of the current free block and not part of the next (allocated)
 					 * block. Check the comments in block_split function for more details.
 					 */
-					const size_t actual_free_block_size = block_size(block) 
+					const size_t actual_free_block_size = block_size(block)
 															- offsetof(block_header_t, next_free)
 															- block_header_overhead;
 
@@ -792,6 +792,11 @@ size_t tlsf_alloc_overhead(void)
 	return block_header_overhead;
 }
 
+static size_t free_size = 0;
+size_t tlsf_free_size() { return free_size; }
+static size_t min_free_size = 0;
+size_t tlsf_min_free_size() { return min_free_size; }
+
 pool_t tlsf_add_pool(tlsf_t tlsf, void* mem, size_t bytes)
 {
 	block_header_t* block;
@@ -810,11 +815,11 @@ pool_t tlsf_add_pool(tlsf_t tlsf, void* mem, size_t bytes)
 	if (pool_bytes < block_size_min || pool_bytes > block_size_max)
 	{
 #if defined (TLSF_64BIT)
-		printf("tlsf_add_pool: Memory size must be between 0x%x and 0x%x00 bytes.\n", 
+		printf("tlsf_add_pool: Memory size must be between 0x%x and 0x%x00 bytes.\n",
 			(unsigned int)(pool_overhead + block_size_min),
 			(unsigned int)((pool_overhead + block_size_max) / 256));
 #else
-		printf("tlsf_add_pool: Memory size must be between %u and %u bytes.\n", 
+		printf("tlsf_add_pool: Memory size must be between %u and %u bytes.\n",
 			(unsigned int)(pool_overhead + block_size_min),
 			(unsigned int)(pool_overhead + block_size_max));
 #endif
@@ -837,6 +842,9 @@ pool_t tlsf_add_pool(tlsf_t tlsf, void* mem, size_t bytes)
 	block_set_size(next, 0);
 	block_set_used(next);
 	block_set_prev_free(next);
+
+        /** @warning Not compatible with adding more than 1 pool */
+        free_size = min_free_size = block_size(block) + block_start_offset;
 
 	return mem;
 }
@@ -932,7 +940,14 @@ void* tlsf_malloc(tlsf_t tlsf, size_t size)
 	control_t* control = tlsf_cast(control_t*, tlsf);
 	const size_t adjust = adjust_request_size(size, ALIGN_SIZE);
 	block_header_t* block = block_locate_free(control, adjust);
-	return block_prepare_used(control, block, adjust);
+        void* mem = block_prepare_used(control, block, adjust);
+
+        if (mem) {
+              free_size -= block_size(block_from_ptr(mem)) + block_header_overhead;
+              if (free_size < min_free_size) min_free_size = free_size;
+        }
+
+        return mem;
 }
 
 /**
@@ -1047,6 +1062,7 @@ void tlsf_free(tlsf_t tlsf, void* ptr)
 		control_t* control = tlsf_cast(control_t*, tlsf);
 		block_header_t* block = block_from_ptr(ptr);
 		tlsf_assert(!block_is_free(block) && "block already marked as free");
+                free_size += block_size(block) + block_header_overhead;    // overhead size does not include `size`
 		block_mark_as_free(block);
 		block = block_merge_prev(control, block);
 		block = block_merge_next(control, block);
@@ -1119,6 +1135,9 @@ void* tlsf_realloc(tlsf_t tlsf, void* ptr, size_t size)
 			/* Trim the resulting block and return the original pointer. */
 			block_trim_used(control, block, adjust);
 			p = ptr;
+
+                        free_size -= block_size(block_from_ptr(ptr)) - cursize;
+                        if (free_size < min_free_size) min_free_size = free_size;
 		}
 	}
 
